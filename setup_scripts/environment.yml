@@ -1,30 +1,11 @@
-name: base
+name: finmathpkg
 channels:
   - defaults
 dependencies:
-  - _anaconda_depends
-  - python=3.11
-  - setuptools
-  - pip
-  - wheel
-  - anaconda-catalogs
-  - anaconda-client
-  - anaconda-project
-  - anaconda-navigator
-  - conda
-  - conda-build
-  - conda-content-trust
-  - conda-libmamba-solver
-  - conda-pack
-  - conda-package-handling
-  - conda-package-streaming
-  - conda-token
-  - conda-verify
-  - python.app
-  - glueviz
-  - pytorch
-  - torchaudio
-  - torchvision
   - matplotlib
-  - shapely
-prefix: /Users/jbelmont/anaconda3
+  - numpy
+  - pandas
+  - pip
+  - python=3.9
+  - scikit-learn
+prefix: /Users/jbelmont/anaconda3/envs/finmathpkg

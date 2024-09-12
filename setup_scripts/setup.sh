@@ -31,8 +31,14 @@ then
     exit 1
 fi
 
-# Create the conda environment from the environment.yml file, using the retrieved environment name
-conda env create -f environment.yml --name "$ENV_NAME"
+# Check if the conda environment already exists
+if conda info --envs | grep -q "^$ENV_NAME\s"; then
+    echo "Environment '$ENV_NAME' already exists. Activating it."
+else
+    # Create the conda environment from the environment.yml file if not found
+    echo "Creating environment '$ENV_NAME' from environment.yml."
+    conda env create -f environment.yml --name "$ENV_NAME"
+fi
 
 # Activate the conda environment
 source $(conda info --base)/etc/profile.d/conda.sh
