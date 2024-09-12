@@ -1,4 +1,5 @@
 import numpy as np
+import sympy as sp
 
 def ZCB_return(R):
     return 1/R
@@ -42,3 +43,36 @@ def euro_opt_payout(S, K, call = True):
     else: 
         return max(0, K-S)
     
+def calculate_mean(data):
+    """Calculate the mean of a dataset."""
+    return sum(data) / len(data)
+
+def calculate_variance(data, sample=True):
+    """
+    Calculate the variance of a dataset.
+    
+    Parameters:
+    data: list or array-like, the dataset
+    sample: bool, if True, use sample variance (n-1), else use population variance (n)
+    
+    Returns:
+    variance: float, the variance of the dataset
+    """
+    mean = calculate_mean(data)
+    n = len(data)
+    
+    # Sum of squared differences from the mean
+    squared_diffs = [(x - mean)**2 for x in data]
+    
+    # If sample variance, divide by (n-1), otherwise divide by n
+    if sample:
+        return sum(squared_diffs) / (n - 1)
+    else:
+        return sum(squared_diffs) / n
+
+def hedge_port(H, A):
+    return np.dot(H, A)
+
+def call_put_parity(C_0, P_0, S_0, K, R):
+    return C_0-P_0==S_0-K/R
+

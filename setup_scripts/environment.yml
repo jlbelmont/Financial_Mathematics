@@ -8,4 +8,5 @@ dependencies:
   - pip
   - python=3.9
   - scikit-learn
+  - sympy
 prefix: /Users/jbelmont/anaconda3/envs/finmathpkg
