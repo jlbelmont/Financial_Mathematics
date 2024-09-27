@@ -142,7 +142,7 @@ def theta(S, K, T, r, sigma, call=True):
         theta = (-S * si.norm.pdf(d1) * sigma / (2 * np.sqrt(T))
                  + r * K * np.exp(-r * T) * si.norm.cdf(-d2))
     
-    return theta / 365  # Return per day theta
+    return theta  # Return per day theta
 
 def rho(S, K, T, r, sigma, call=True):
     """
