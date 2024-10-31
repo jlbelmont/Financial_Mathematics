@@ -3,6 +3,9 @@ import scipy.stats as si
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from scipy.interpolate import CubicSpline
+import sympy as sp
+import time
+from scipy.interpolate import interp1d
 
 def ZCB_return(R):
     return 1/R
@@ -316,3 +319,756 @@ def spline_interpolation(strike_prices, premiums, target_strike):
     # Estimate the premium for the target strike price
     estimated_premium = spline_func(target_strike)
     return estimated_premium
+
+def calculate_weights(X_T_up, X_T_down, R, S_T_up, S_T_down):
+    # Coefficients matrix (A) for the linear system
+    A = np.array([[R, S_T_up],
+                  [R, S_T_down]])
+    
+    # Values matrix (b) for the linear system
+    b = np.array([X_T_up, X_T_down])
+    
+    # Solve for h_0 and h_1 using numpy's linear algebra solver
+    try:
+        weights = np.linalg.solve(A, b)
+        h_0, h_1 = weights
+        return h_0, h_1
+    except np.linalg.LinAlgError as e:
+        return str(e)
+    
+def solve_portfolio_weights(X_T_up, X_T_down, R, S_T_up, S_T_down):
+    # Define symbols for the weights
+    h_0, h_1 = sp.symbols('h_0 h_1')
+    
+    # Set up the equations based on the portfolio values
+    equation1 = sp.Eq(X_T_up, h_0 * R + h_1 * S_T_up)
+    equation2 = sp.Eq(X_T_down, h_0 * R + h_1 * S_T_down)
+    
+    # Solve the system of equations
+    solutions = sp.solve((equation1, equation2), (h_0, h_1))
+    
+    return solutions
+
+def solve_portfolio_weights_symbolically():
+    # Define symbolic variables
+    h_0, h_1 = sp.symbols('h_0 h_1')
+    X_T_up, X_T_down, R, S_T_up, S_T_down = sp.symbols('X_T_up X_T_down R S_T_up S_T_down')
+    
+    # Set up the equations based on the portfolio values
+    equation1 = sp.Eq(X_T_up, h_0 * R + h_1 * S_T_up)
+    equation2 = sp.Eq(X_T_down, h_0 * R + h_1 * S_T_down)
+    
+    # Solve the system of equations symbolically
+    solutions = sp.solve((equation1, equation2), (h_0, h_1))
+    
+    return solutions
+
+def crr_european_option(S0, K, T, r, sigma, N, option_type="call"):
+    """
+    Cox-Ross-Rubinstein (CRR) model for pricing European call and put options.
+
+    :param S0: Initial stock price (Spot price)
+    :param K: Strike price
+    :param T: Time to maturity
+    :param r: Risk-free interest rate
+    :param sigma: Volatility of the underlying asset
+    :param N: Number of time steps
+    :param option_type: 'call' for a call option, 'put' for a put option
+    :return: Option price at t=0 (C(0) or P(0))
+    """
+    # Time step
+    dt = T / N
+    # Up and down factors
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+    # Risk-neutral probability
+    p = (np.exp(r * dt) - d) / (u - d)
+    
+    # Step 1: Stock price tree
+    stock_prices = np.zeros((N + 1, N + 1))
+    for i in range(N + 1):
+        for j in range(i + 1):
+            stock_prices[j, i] = S0 * (u ** (i - j)) * (d ** j)
+    
+    # Step 2: Option value at maturity
+    option_values = np.zeros((N + 1, N + 1))
+    if option_type == "call":
+        option_values[:, N] = np.maximum(stock_prices[:, N] - K, 0)
+    elif option_type == "put":
+        option_values[:, N] = np.maximum(K - stock_prices[:, N], 0)
+    
+    # Step 3: Backward induction to get the option price at t=0
+    for i in range(N - 1, -1, -1):
+        for j in range(i + 1):
+            option_values[j, i] = np.exp(-r * dt) * (p * option_values[j, i + 1] + (1 - p) * option_values[j + 1, i + 1])
+    
+    return option_values[0, 0]
+
+def CRReurAD(S0, K, T, r, sigma, N, option_type="call"):
+    """
+    Cox-Ross-Rubinstein (CRR) model for pricing European call and put options using the Backward Pricing Formula.
+
+    :param S0: Initial stock price (Spot price)
+    :param K: Strike price
+    :param T: Time to maturity
+    :param r: Risk-free interest rate
+    :param sigma: Volatility of the underlying asset
+    :param N: Number of time steps
+    :param option_type: 'call' for a call option, 'put' for a put option
+    :return: Option price at t=0 (C(0) or P(0))
+    """
+    # Time step
+    dt = T / N
+    # Up and down factors
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+    # Risk-neutral probability
+    p = (np.exp(r * dt) - d) / (u - d)
+    
+    # Step 1: Stock price tree
+    stock_prices = np.zeros((N + 1, N + 1))
+    for i in range(N + 1):
+        for j in range(i + 1):
+            stock_prices[j, i] = S0 * (u ** (i - j)) * (d ** j)
+    
+    # Step 2: Option value at maturity
+    option_values = np.zeros((N + 1, N + 1))
+    if option_type == "call":
+        option_values[:, N] = np.maximum(stock_prices[:, N] - K, 0)
+    elif option_type == "put":
+        option_values[:, N] = np.maximum(K - stock_prices[:, N], 0)
+    
+    # Step 3: Backward induction to get the option price at t=0
+    for i in range(N - 1, -1, -1):
+        for j in range(i + 1):
+            option_values[j, i] = np.exp(-r * dt) * (p * option_values[j, i + 1] + (1 - p) * option_values[j + 1, i + 1])
+    
+    return option_values[0, 0]
+
+# def profile_CRR(N_values, S0, K, T, r, sigma, option_type="call"):
+#     """
+#     Profile the time taken to compute the call and put option prices for different N values.
+
+#     Parameters:
+#     N_values: list of time steps (e.g., [10, 100, 1000])
+#     S0, K, T, r, sigma: CRR model parameters
+#     option_type: 'call' or 'put'
+
+#     Returns:
+#     A dictionary of results: {N: (Option_price, time_taken)}
+#     """
+#     import time
+#     results = {}
+
+#     for N in N_values:
+#         start_time = time.time()
+#         option_price = crr_european_option(S0, K, T, r, sigma, N, option_type)
+#         end_time = time.time()
+#         time_taken = end_time - start_time
+#         results[N] = (option_price, time_taken)
+
+#     return results
+
+# def CRReur(T, S0, K, r, sigma, N):
+#     # Calculate parameters for the binomial model
+#     dt = T / N  # Time step
+#     u = np.exp(sigma * np.sqrt(dt))  # Up factor
+#     d = 1 / u  # Down factor
+#     p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+#     # Initialize call and put option value matrices
+#     call_values = np.zeros((N + 1, N + 1))
+#     put_values = np.zeros((N + 1, N + 1))
+
+#     # Fill option values at maturity
+#     for j in range(N + 1):
+#         asset_price = S0 * (u ** (N - j)) * (d ** j)
+#         call_values[j, N] = max(0, asset_price - K)
+#         put_values[j, N] = max(0, K - asset_price)
+
+#     # Backward induction to calculate option prices
+#     for j in range(N - 1, -1, -1):
+#         for i in range(j + 1):
+#             call_values[i, j] = np.exp(-r * dt) * (p * call_values[i, j + 1] + (1 - p) * call_values[i + 1, j + 1])
+#             put_values[i, j] = np.exp(-r * dt) * (p * put_values[i, j + 1] + (1 - p) * put_values[i + 1, j + 1])
+
+#     return call_values[0, 0], put_values[0, 0]  # Return C(0) and P(0)
+
+# def CRReur(T, S0, K, r, sigma, N):
+#     """
+#     Compute Call and Put premiums using the Cox-Ross-Rubinstein model.
+    
+#     Parameters:
+#     T : float : Time to maturity
+#     S0 : float : Initial stock price
+#     K : float : Strike price
+#     r : float : Risk-free interest rate
+#     sigma : float : Volatility of the underlying asset
+#     N : int : Number of time steps
+
+#     Returns:
+#     tuple : (call_values, put_values)
+#     """
+#     dt = T / N  # Time step
+#     u = np.exp(sigma * np.sqrt(dt))  # Up factor
+#     d = 1 / u  # Down factor
+#     p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+#     # Initialize call and put option value matrices
+#     call_values = np.zeros((N + 1, N + 1))
+#     put_values = np.zeros((N + 1, N + 1))
+
+#     # Fill option values at maturity
+#     for j in range(N + 1):
+#         asset_price = S0 * (u ** (N - j)) * (d ** j)
+#         call_values[j, N] = max(0, asset_price - K)
+#         put_values[j, N] = max(0, K - asset_price)
+
+#     # Backward induction to calculate option prices
+#     for j in range(N - 1, -1, -1):
+#         for i in range(j + 1):
+#             call_values[i, j] = np.exp(-r * dt) * (p * call_values[i, j + 1] + (1 - p) * call_values[i + 1, j + 1])
+#             put_values[i, j] = np.exp(-r * dt) * (p * put_values[i, j + 1] + (1 - p) * put_values[i + 1, j + 1])
+
+#     return call_values, put_values  # Return the matrices of call and put values
+
+def CRReurT(S0, K, T, r, sigma, N):
+    """
+    Compute Call and Put premiums using the Cox-Ross-Rubinstein model.
+    
+    Parameters:
+    T : float : Time to maturity
+    S0 : float : Initial stock price
+    K : float : Strike price
+    r : float : Risk-free interest rate
+    sigma : float : Volatility of the underlying asset
+    N : int : Number of time steps
+
+    Returns:
+    tuple : (call_values, put_values)
+    """
+    dt = T / N  # Time step
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor
+    d = 1 / u  # Down factor
+    p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+    # Initialize call and put option value matrices
+    call_values = np.zeros((N + 1, N + 1))
+    put_values = np.zeros((N + 1, N + 1))
+
+    # Fill option values at maturity
+    for j in range(N + 1):
+        asset_price = S0 * (u ** (N - j)) * (d ** j)
+        call_values[j, N] = max(0, asset_price - K)
+        put_values[j, N] = max(0, K - asset_price)
+
+    # Backward induction to calculate option prices
+    for j in range(N - 1, -1, -1):
+        for i in range(j + 1):
+            call_values[i, j] = np.exp(-r * dt) * (p * call_values[i, j + 1] + (1 - p) * call_values[i + 1, j + 1])
+            put_values[i, j] = np.exp(-r * dt) * (p * put_values[i, j + 1] + (1 - p) * put_values[i + 1, j + 1])
+
+    return call_values, put_values  # Return the matrices of call and put values
+
+def profile_CRR(N_values, S0, K, T, r, sigma):
+    """
+    Profile the time taken to compute the call and put option prices for different N values.
+
+    Parameters:
+    N_values (list): List of time steps (e.g., [10, 100, 1000])
+    S0 (float): Initial spot price of the underlying asset.
+    K (float): Strike price of the options.
+    T (float): Time to expiry of the options in years.
+    r (float): Risk-free interest rate (annualized).
+    sigma (float): Volatility of the underlying asset (annualized).
+
+    Returns:
+    dict: A dictionary of results: {N: (call_price, put_price, time_taken)}
+    """
+    results = {}
+
+    for N in N_values:
+        start_time = time.time()
+        call_price, put_price = CRReur(S0, K, T, r, sigma, N)
+        end_time = time.time()
+        time_taken = end_time - start_time
+        results[N] = (call_price, put_price, time_taken)
+
+    return results
+
+def CRR_Arrow_Debreu(S0, K, T, r, sigma, N, option_type='call'):
+    """
+    Computes the price of a European-style option using the Cox-Ross-Rubinstein
+    (CRR) binomial tree model with Arrow-Debreu pricing.
+
+    Parameters:
+    S0 (float): Initial spot price of the underlying asset.
+    K (float): Strike price of the option.
+    T (float): Time to expiry of the option in years.
+    r (float): Risk-free interest rate (annualized).
+    sigma (float): Volatility of the underlying asset (annualized).
+    N (int): Number of time steps in the binomial model.
+    option_type (str): Type of the option ('call' for call options, 'put' for put options).
+                       Default is 'call'.
+
+    Returns:
+    float: The present value of the option at time t=0.
+    """
+    
+    # Calculate the parameters for the binomial tree
+    dt = T / N  # Time step size
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor for price increase
+    d = 1 / u  # Down factor for price decrease
+    p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+    # Initialize asset prices at maturity
+    asset_prices = np.zeros(N + 1)
+    for i in range(N + 1):
+        asset_prices[i] = S0 * (u ** (N - i)) * (d ** i)  # Calculate price at each node
+
+    # Initialize option values at maturity based on the option type
+    if option_type == 'call':
+        option_values = np.maximum(0, asset_prices - K)  # Call option payoff
+    else:
+        option_values = np.maximum(0, K - asset_prices)  # Put option payoff
+
+    # Backward induction to calculate option price at time t=0
+    for j in range(N - 1, -1, -1):
+        for i in range(j + 1):
+            # Calculate the present value of the option at node (j, i)
+            option_values[i] = np.exp(-r * dt) * (p * option_values[i] + (1 - p) * option_values[i + 1])
+
+    return option_values[0]  # Return the price of the option at time t=0
+
+def CRReur(S0, K, T, r, sigma, N):
+    """
+    Computes the prices of European-style call and put options using 
+    the Cox-Ross-Rubinstein (CRR) model with backward induction.
+
+    Parameters:
+    S0 (float): Initial spot price of the underlying asset.
+    K (float): Strike price of the options.
+    T (float): Time to expiry of the options in years.
+    r (float): Risk-free interest rate (annualized).
+    sigma (float): Volatility of the underlying asset (annualized).
+    N (int): Number of time steps in the binomial model.
+
+    Returns:
+    tuple: A tuple containing the call price and put price at time t=0.
+    """
+    
+    # Calculate parameters for the binomial tree
+    dt = T / N  # Time step size
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor for price increase
+    d = 1 / u  # Down factor for price decrease
+    p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+    # Initialize asset prices and option values
+    asset_prices = np.zeros((N + 1, N + 1))  # Asset prices at each node
+    call_values = np.zeros((N + 1, N + 1))   # Call option values at each node
+    put_values = np.zeros((N + 1, N + 1))    # Put option values at each node
+
+    # Fill in the asset prices at maturity
+    for i in range(N + 1):
+        asset_prices[i, N] = S0 * (u ** (N - i)) * (d ** i)
+
+    # Calculate option values at maturity
+    for i in range(N + 1):
+        call_values[i, N] = max(0, asset_prices[i, N] - K)  # Call option payoff
+        put_values[i, N] = max(0, K - asset_prices[i, N])   # Put option payoff
+
+    # Backward induction for call option values
+    for j in range(N - 1, -1, -1):
+        for i in range(j + 1):
+            call_values[i, j] = np.exp(-r * dt) * (p * call_values[i, j + 1] + (1 - p) * call_values[i + 1, j + 1])
+
+    # Backward induction for put option values
+    for j in range(N - 1, -1, -1):
+        for i in range(j + 1):
+            put_values[i, j] = np.exp(-r * dt) * (p * put_values[i, j + 1] + (1 - p) * put_values[i + 1, j + 1])
+
+    # The option price at time t=0 is found at the top of the trees
+    call_price = call_values[0, 0]
+    put_price = put_values[0, 0]
+
+    return call_price, put_price  # Return the call and put prices at time t=0
+
+def CRR_Arrow_Debreu_O(N, S0, K, T, r, sigma, option_type='call'):
+    """
+    Optimized Cox-Ross-Rubinstein (CRR) method using the Arrow-Debreu pricing model.
+    
+    Parameters:
+    N (int): Number of time steps
+    S0 (float): Initial stock price
+    K (float): Strike price
+    T (float): Time to maturity
+    r (float): Risk-free interest rate
+    sigma (float): Volatility of the underlying asset
+    option_type (str): 'call' for call option, 'put' for put option
+    
+    Returns:
+    tuple: (option_price, computation_time)
+    """
+    start_time = time.time()  # Start timing
+
+    # Calculate the parameters for the binomial tree
+    dt = T / N
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor
+    d = 1 / u  # Down factor
+    p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+    # Initialize option values at maturity based on the option type
+    option_values = np.zeros(N + 1)
+    for i in range(N + 1):
+        asset_price_at_maturity = S0 * (u ** (N - i)) * (d ** i)
+        option_values[i] = np.maximum(0, asset_price_at_maturity - K) if option_type == 'call' else np.maximum(0, K - asset_price_at_maturity)
+
+    # Backward induction to get option price at t=0
+    for j in range(N - 1, -1, -1):
+        option_values = np.exp(-r * dt) * (p * option_values[:-1] + (1 - p) * option_values[1:])
+
+    computation_time = time.time() - start_time  # End timing
+    return option_values[0], computation_time  # Return option price and time taken
+
+def plot_convergence(N_values, S0, K, T, r, sigma):
+    """
+    Plot the logarithm of the differences between successive Arrow-Debreu prices against log N.
+    
+    Parameters:
+    N_values: List of time steps (e.g., [10, 100, 1000])
+    S0, K, T, r, sigma: Parameters for option pricing
+    """
+    call_prices = []
+    put_prices = []
+    computation_times = []  # To store computation times if needed
+
+    for N in N_values:
+        call_price_ad, time_call = CRR_Arrow_Debreu_O(N, S0, K, T, r, sigma, option_type='call')
+        put_price_ad, time_put = CRR_Arrow_Debreu_O(N, S0, K, T, r, sigma, option_type='put')
+        call_prices.append(call_price_ad)
+        put_prices.append(put_price_ad)
+        computation_times.append((time_call, time_put))  # Store computation times
+
+    # Compute the log differences and log N
+    log_N = np.log(N_values)
+    log_diff_call = np.log(np.abs(np.diff(call_prices)))  # Calculate log of the differences for calls
+    log_diff_put = np.log(np.abs(np.diff(put_prices)))    # Calculate log of the differences for puts
+
+    # Polynomial fitting
+    p_call = np.polyfit(log_N[1:], log_diff_call, 1)  # Linear fit for call price differences
+    p_put = np.polyfit(log_N[1:], log_diff_put, 1)    # Linear fit for put price differences
+
+    # Create polynomial functions
+    poly_call = np.poly1d(p_call)
+    poly_put = np.poly1d(p_put)
+
+    # Plotting
+    plt.figure(figsize=(12, 6))
+
+    # Plot Call Price Differences
+    plt.subplot(1, 2, 1)
+    plt.plot(log_N[1:], log_diff_call, marker='o', label='Call Price Differences')
+    plt.plot(log_N[1:], poly_call(log_N[1:]), linestyle='--', color='red', 
+             label='Poly Fit: $y={:.2f} \cdot x + {:.2f}$'.format(p_call[0], p_call[1]))
+    plt.title('Logarithm of Call Price Differences vs Log N')
+    plt.xlabel('log(N)')
+    plt.ylabel('log(|Call Price Difference|)')
+    plt.grid()
+    plt.legend()
+
+    # Plot Put Price Differences
+    plt.subplot(1, 2, 2)
+    plt.plot(log_N[1:], log_diff_put, marker='o', color='orange', label='Put Price Differences')
+    plt.plot(log_N[1:], poly_put(log_N[1:]), linestyle='--', color='red', 
+             label='Poly Fit: $y={:.2f} \cdot x + {:.2f}$'.format(p_put[0], p_put[1]))
+    plt.title('Logarithm of Put Price Differences vs Log N')
+    plt.xlabel('log(N)')
+    plt.ylabel('log(|Put Price Difference|)')
+    plt.grid()
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+    
+def compute_call_prices(S0_range, K, T, r, sigma, N):
+    """
+    Compute call option prices for a range of spot prices S0.
+    """
+    call_prices = []
+    for S0 in S0_range:
+        call_price = CRR_Arrow_Debreu(S0, K, T, r, sigma, N, option_type='call')
+        call_prices.append(call_price)
+    return call_prices
+
+# def CRR_AD_O(N, S0, K, T, r, sigma):
+#     """
+#     Optimized Cox-Ross-Rubinstein (CRR) method using the Arrow-Debreu pricing model.
+    
+#     Parameters:
+#     N (int): Number of time steps
+#     S0 (float): Initial stock price
+#     K (float): Strike price
+#     T (float): Time to maturity
+#     r (float): Risk-free interest rate
+#     sigma (float): Volatility of the underlying asset
+    
+#     Returns:
+#     dict: Dictionary containing call and put option prices
+#     """
+#     start_time = time.time()  # Start timing
+
+#     # Calculate the parameters for the binomial tree
+#     dt = T / N
+#     u = np.exp(sigma * np.sqrt(dt))  # Up factor
+#     d = 1 / u  # Down factor
+#     p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+#     # Initialize option values at maturity for call and put options
+#     call_values = np.zeros(N + 1)
+#     put_values = np.zeros(N + 1)
+    
+#     for i in range(N + 1):
+#         asset_price_at_maturity = S0 * (u ** (N - i)) * (d ** i)
+#         call_values[i] = np.maximum(0, asset_price_at_maturity - K)
+#         put_values[i] = np.maximum(0, K - asset_price_at_maturity)
+
+#     # Backward induction to get option prices at t=0
+#     for j in range(N - 1, -1, -1):
+#         call_values = np.exp(-r * dt) * (p * call_values[:-1] + (1 - p) * call_values[1:])
+#         put_values = np.exp(-r * dt) * (p * put_values[:-1] + (1 - p) * put_values[1:])
+
+#     # Compute the option prices at t=0
+#     call_price = call_values[0]
+#     put_price = put_values[0]
+
+#     computation_time = time.time() - start_time  # End timing
+    
+#     return {
+#         'call_price': call_price,
+#         'put_price': put_price,
+#         'computation_time': computation_time
+#     }
+
+# def compute_greeks(N, S0, K, T, r, sigma):
+#     """
+#     Compute Greeks for call and put options using the CRR_AD_O function.
+
+#     Parameters:
+#     N (int): Number of time steps
+#     S0 (float): Initial stock price
+#     K (float): Strike price
+#     T (float): Time to maturity
+#     r (float): Risk-free interest rate
+#     sigma (float): Volatility of the underlying asset
+    
+#     Returns:
+#     dict: Dictionary containing Greeks for call and put options
+#     """
+#     option_prices = CRR_AD_O(N, S0, K, T, r, sigma)
+#     call_price = option_prices['call_price']
+#     put_price = option_prices['put_price']
+    
+#     # Compute Greeks using interpolation method for Delta and Gamma
+#     h0 = 2 * S0 * sigma * np.sqrt(T / N)  # critical h
+#     u2 = np.exp(2 * sigma * np.sqrt(T / N))  # squared up factor
+    
+#     # Correctly create the shifted abscissas
+#     x = [price - S0 for price in [S0 / u2, S0, S0 * u2]]  # shifted abscissas
+
+#     # Prices for call options at shifted asset prices
+#     call_u2 = CRR_AD_O(N, S0 * u2, K, T, r, sigma)['call_price']
+#     call_d2 = CRR_AD_O(N, S0 / u2, K, T, r, sigma)['call_price']
+    
+#     # Fit polynomial and calculate Delta and Gamma for Call
+#     yC = [call_d2, call_price, call_u2]  # Call ordinates
+#     pC = np.polyfit(x, yC, 2)
+#     delta_C = pC[2]
+#     gamma_C = 2 * pC[1]
+
+#     # Prices for put options at shifted asset prices
+#     put_u2 = CRR_AD_O(N, S0 * u2, K, T, r, sigma)['put_price']
+#     put_d2 = CRR_AD_O(N, S0 / u2, K, T, r, sigma)['put_price']
+    
+#     # Fit polynomial and calculate Delta and Gamma for Put
+#     yP = [put_d2, put_price, put_u2]  # Put ordinates
+#     pP = np.polyfit(x, yP, 2)
+#     delta_P = pP[2]
+#     gamma_P = 2 * pP[1]
+
+#     # For other Greeks, use centered difference approximation
+#     h = 0.10 * T  # for Theta
+#     call_u = CRR_AD_O(N, S0, K, T + h, r, sigma)['call_price']
+#     call_d = CRR_AD_O(N, S0, K, T - h, r, sigma)['call_price']
+#     theta_C = -(call_u - call_d) / (2 * h)
+
+#     put_u = CRR_AD_O(N, S0, K, T + h, r, sigma)['put_price']
+#     put_d = CRR_AD_O(N, S0, K, T - h, r, sigma)['put_price']
+#     theta_P = -(put_u - put_d) / (2 * h)
+
+#     h = 0.10 * sigma  # for Vega
+#     call_u = CRR_AD_O(N, S0, K, T, r, sigma + h)['call_price']
+#     call_d = CRR_AD_O(N, S0, K, T, r, sigma - h)['call_price']
+#     vega_C = (call_u - call_d) / (2 * h)
+
+#     put_u = CRR_AD_O(N, S0, K, T, r, sigma + h)['put_price']
+#     put_d = CRR_AD_O(N, S0, K, T, r, sigma - h)['put_price']
+#     vega_P = (put_u - put_d) / (2 * h)
+
+#     h = 0.10 * r  # for Rho
+#     call_u = CRR_AD_O(N, S0, K, T, r + h, sigma)['call_price']
+#     call_d = CRR_AD_O(N, S0, K, T, r - h, sigma)['call_price']
+#     rho_C = (call_u - call_d) / (2 * h)
+
+#     put_u = CRR_AD_O(N, S0, K, T, r + h, sigma)['put_price']
+#     put_d = CRR_AD_O(N, S0, K, T, r - h, sigma)['put_price']
+#     rho_P = (put_u - put_d) / (2 * h)
+
+#     return {
+#         'DeltaC': delta_C,
+#         'GammaC': gamma_C,
+#         'ThetaC': theta_C,
+#         'VegaC': vega_C,
+#         'RhoC': rho_C,
+#         'DeltaP': delta_P,
+#         'GammaP': gamma_P,
+#         'ThetaP': theta_P,
+#         'VegaP': vega_P,
+#         'RhoP': rho_P
+#     }
+
+def CRR_AD_O(N, S0, K, T, r, sigma):
+    """
+    Optimized Cox-Ross-Rubinstein (CRR) method using the Arrow-Debreu pricing model.
+    """
+    start_time = time.time()  # Start timing
+
+    # Calculate the parameters for the binomial tree
+    dt = T / N
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor
+    d = 1 / u  # Down factor
+    p = (np.exp(r * dt) - d) / (u - d)  # Risk-neutral probability
+
+    # Initialize option values at maturity for call and put options
+    call_values = np.zeros(N + 1)
+    put_values = np.zeros(N + 1)
+    
+    for i in range(N + 1):
+        asset_price_at_maturity = S0 * (u ** (N - i)) * (d ** i)
+        call_values[i] = np.maximum(0, asset_price_at_maturity - K)
+        put_values[i] = np.maximum(0, K - asset_price_at_maturity)
+
+    # Backward induction to get option prices at t=0
+    for j in range(N - 1, -1, -1):
+        call_values = np.exp(-r * dt) * (p * call_values[:-1] + (1 - p) * call_values[1:])
+        put_values = np.exp(-r * dt) * (p * put_values[:-1] + (1 - p) * put_values[1:])
+
+    # Compute the option prices at t=0
+    call_price = call_values[0]
+    put_price = put_values[0]
+
+    computation_time = time.time() - start_time  # End timing
+    
+    return {
+        'call_price': call_price,
+        'put_price': put_price,
+        'computation_time': computation_time
+    }
+
+def compute_greeks(N, S0, K, T, r, sigma):
+    """
+    Compute Greeks for call and put options using the CRR_AD_O function.
+    """
+    # Calculate up factor and down factor
+    dt = T / N
+    u = np.exp(sigma * np.sqrt(dt))  # Up factor
+    d = 1 / u  # Down factor
+
+    # Calculate shifted abscissas for interpolation
+    S_points = [
+        S0 / u**2,  # S0 / u^2
+        S0,          # S0
+        S0 * u**2    # S0 * u^2
+    ]
+    
+    # Calculate option prices at shifted stock prices
+    prices = {
+        'call': [CRR_AD_O(N, S, K, T, r, sigma)['call_price'] for S in S_points],
+        'put': [CRR_AD_O(N, S, K, T, r, sigma)['put_price'] for S in S_points]
+    }
+
+    # Unpack prices for call and put
+    p0_C, p1_C, p2_C = prices['call']
+    p0_P, p1_P, p2_P = prices['put']
+    
+    # Coefficients for call option using quadratic interpolation
+    A_C = np.array([
+        [S_points[0]**2, S_points[0], 1],
+        [S_points[1]**2, S_points[1], 1],
+        [S_points[2]**2, S_points[2], 1]
+    ])
+    B_C = np.array([p0_C, p1_C, p2_C])
+    
+    coeffs_C = np.linalg.solve(A_C, B_C)  # Solve for a, b, c
+    a_C, b_C, _ = coeffs_C
+
+    # Delta and Gamma for call
+    delta_C = 2 * a_C * S0 + b_C  # Evaluate derivative at S0
+    gamma_C = 2 * a_C  # Gamma is twice the quadratic term
+
+    # Coefficients for put option using quadratic interpolation
+    A_P = np.array([
+        [S_points[0]**2, S_points[0], 1],
+        [S_points[1]**2, S_points[1], 1],
+        [S_points[2]**2, S_points[2], 1]
+    ])
+    B_P = np.array([p0_P, p1_P, p2_P])
+    
+    coeffs_P = np.linalg.solve(A_P, B_P)  # Solve for a, b, c
+    a_P, b_P, _ = coeffs_P
+
+    # Delta and Gamma for put
+    delta_P = 2 * a_P * S0 + b_P  # Evaluate derivative at S0
+    gamma_P = 2 * a_P  # Gamma is twice the quadratic term
+
+    # Compute Theta using centered difference approximation
+    h = 0.10 * T  # for Theta
+    call_u = CRR_AD_O(N, S0, K, T + h, r, sigma)['call_price']
+    call_d = CRR_AD_O(N, S0, K, T - h, r, sigma)['call_price']
+    theta_C = -(call_u - call_d) / (2 * h)
+
+    put_u = CRR_AD_O(N, S0, K, T + h, r, sigma)['put_price']
+    put_d = CRR_AD_O(N, S0, K, T - h, r, sigma)['put_price']
+    theta_P = -(put_u - put_d) / (2 * h)
+
+    # Compute Vega using centered difference approximation
+    h = 0.10 * sigma  # for Vega
+    call_u = CRR_AD_O(N, S0, K, T, r, sigma + h)['call_price']
+    call_d = CRR_AD_O(N, S0, K, T, r, sigma - h)['call_price']
+    vega_C = (call_u - call_d) / (2 * h)
+
+    put_u = CRR_AD_O(N, S0, K, T, r, sigma + h)['put_price']
+    put_d = CRR_AD_O(N, S0, K, T, r, sigma - h)['put_price']
+    vega_P = (put_u - put_d) / (2 * h)
+
+    # Compute Rho using centered difference approximation
+    h = 0.10 * r  # for Rho
+    call_u = CRR_AD_O(N, S0, K, T, r + h, sigma)['call_price']
+    call_d = CRR_AD_O(N, S0, K, T, r - h, sigma)['call_price']
+    rho_C = (call_u - call_d) / (2 * h)
+
+    put_u = CRR_AD_O(N, S0, K, T, r + h, sigma)['put_price']
+    put_d = CRR_AD_O(N, S0, K, T, r - h, sigma)['put_price']
+    rho_P = (put_u - put_d) / (2 * h)
+
+    return {
+        'DeltaC': delta_C,  # Call Delta
+        'GammaC': gamma_C,  # Call Gamma
+        'ThetaC': theta_C,  # Call Theta
+        'VegaC': vega_C,    # Call Vega
+        'RhoC': rho_C,      # Call Rho
+        'DeltaP': delta_P,  # Put Delta
+        'GammaP': gamma_P,  # Put Gamma
+        'ThetaP': theta_P,  # Put Theta
+        'VegaP': vega_P,    # Put Vega
+        'RhoP': rho_P       # Put Rho
+    }
